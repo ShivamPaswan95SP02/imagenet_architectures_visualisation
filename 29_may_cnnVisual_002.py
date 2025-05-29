@@ -12,18 +12,18 @@ from torchvision.io import decode_image
 from PIL import Image
 import torch.nn as nn
 
-# Function to load a model from file
+# Cache the model loading function to avoid reloading the model on every interaction
+@st.cache_resource
 def load_model_from_file(uploaded_file):
     try:
-        # Load the model from the uploaded file
         model = torch.load(uploaded_file, map_location=torch.device('cpu'))
         model.eval()
-        return model, None  # Returning None for weights as they're part of the model
+        return model, None
     except Exception as e:
         st.error(f"Error loading model: {str(e)}")
         return None, None
 
-# Function to load a predefined model
+@st.cache_resource
 def load_predefined_model(model_name):
     try:
         if model_name == "AlexNet":
@@ -54,21 +54,20 @@ def visualize_kernels(model):
     st.write("Model Architecture:")
     st.write(model)
 
-    weights = dict()
+    # Extract convolutional layers once and cache them
+    weights = {}
     for name, module in model.named_modules():
         if isinstance(module, nn.Conv2d):
-            kernel = module.weight
-            weights[name] = module.weight
-    
+            weights[name] = module.weight.detach().cpu().numpy()
+
     if not weights:
         st.warning("No convolutional layers found in the model!")
         return
-    
-    selected_name = st.selectbox("Select a layer:", weights.keys())
-    kernel = weights[selected_name].detach().numpy()
 
-    # Handle different kernel shapes
-    if len(kernel.shape) == 4:  # Standard conv2d weights [out_channels, in_channels, H, W]
+    selected_name = st.selectbox("Select a layer:", list(weights.keys()))
+    kernel = weights[selected_name]
+
+    if len(kernel.shape) == 4:
         m, n, s, _ = kernel.shape
         fig, axes = plt.subplots(m, n, figsize=(n, m))
         for i in range(m):
@@ -78,7 +77,7 @@ def visualize_kernels(model):
                 else:
                     axes[i, j].imshow(kernel[i, j, :, :])
                 axes[i, j].axis('off')
-    elif len(kernel.shape) == 3:  # Possible 1D conv or special case
+    elif len(kernel.shape) == 3:
         st.warning("Unusual kernel shape detected. Trying to visualize anyway...")
         m, n, s = kernel.shape
         fig, axes = plt.subplots(m, 1, figsize=(3, m))
@@ -92,31 +91,31 @@ def visualize_kernels(model):
     st.pyplot(fig)
 
 def main():
-    st.title("CNN Kernel Visualization")
-    
-    # Option to choose between predefined models or upload custom model
-    option = st.radio(
+    st.sidebar.title("CNN Kernel Visualization")
+
+    option = st.sidebar.radio(
         "Choose model source:",
         ("Use predefined model", "Upload custom model")
     )
-    
+
     model = None
     weights = None
-    
+
     if option == "Use predefined model":
-        model_name = st.selectbox(
+        model_name = st.sidebar.selectbox(
             "Select a predefined model:",
             ["AlexNet", "EfficientNet_B0", "MNASNet0_5", "MobileNet_V3_Small", "RegNet_X_1_6GF"]
         )
         model, weights = load_predefined_model(model_name)
     else:
-        uploaded_file = st.file_uploader(
+        uploaded_file = st.sidebar.file_uploader(
             "Upload your PyTorch model (.pt or .pth file)",
             type=["pt", "pth"]
         )
         if uploaded_file is not None:
             model, weights = load_model_from_file(uploaded_file)
-    
+
+    st.title("Visualization Page")
     if model is not None:
         visualize_kernels(model)
 
